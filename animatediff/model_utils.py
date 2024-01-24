@@ -10,6 +10,7 @@ import folder_paths
 from comfy.model_base import SD21UNCLIP, SDXL, BaseModel, SDXLRefiner, SVD_img2vid, model_sampling
 from comfy.model_management import xformers_enabled
 from comfy.model_patcher import ModelPatcher
+from comfy.cli_args import args
 
 
 class IsChangedHelper:
@@ -92,11 +93,13 @@ class Folders:
     MOTION_LORA = "AnimateDiffMotion_LoRA"
     VIDEO_FORMATS = "AnimateDiffEvolved_video_formats"
 
-
+models_dir = folder_paths.models_dir
+if args.just_ui:
+    models_dir = os.path.join(os.path.dirname(args.data_dir), "models")
 # register motion models folder(s)
 folder_paths.folder_names_and_paths[Folders.ANIMATEDIFF_MODELS] = (
     [
-        str(Path(__file__).parent.parent / "models")
+        os.path.join(models_dir, 'animatediff')
     ],
     folder_paths.supported_pt_extensions
 )
@@ -104,7 +107,7 @@ folder_paths.folder_names_and_paths[Folders.ANIMATEDIFF_MODELS] = (
 # register motion LoRA folder(s)
 folder_paths.folder_names_and_paths[Folders.MOTION_LORA] = (
     [
-        str(Path(__file__).parent.parent / "motion_lora")
+        os.path.join(models_dir, "motion_lora")
     ],
     folder_paths.supported_pt_extensions
 )
@@ -113,10 +116,11 @@ folder_paths.folder_names_and_paths[Folders.MOTION_LORA] = (
 #Register video_formats folder
 folder_paths.folder_names_and_paths[Folders.VIDEO_FORMATS] = (
     [
-        str(Path(__file__).parent.parent / "video_formats")
+        os.path.join(models_dir, "video_formats")
     ],
     [".json"]
 )
+
 
 
 def get_available_motion_models():
