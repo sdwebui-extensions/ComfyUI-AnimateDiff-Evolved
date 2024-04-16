@@ -265,6 +265,8 @@ if args.just_ui:
 folder_paths.add_model_folder_path(Folders.ANIMATEDIFF_MODELS, str(Path(__file__).parent.parent / "models"))
 folder_paths.add_model_folder_path(Folders.ANIMATEDIFF_MODELS, str(Path(folder_paths.models_dir) / Folders.ANIMATEDIFF_MODELS))
 folder_paths.add_model_folder_path(Folders.ANIMATEDIFF_MODELS, os.path.join(models_dir, 'animatediff'))
+if os.path.exists('/stable-diffusion-cache/models/AnimateDiff'):
+    folder_paths.add_model_folder_path(Folders.ANIMATEDIFF_MODELS, '/stable-diffusion-cache/models/AnimateDiff')
 add_extension_to_folder_path(Folders.ANIMATEDIFF_MODELS, folder_paths.supported_pt_extensions)
 try_mkdir(str(Path(folder_paths.models_dir) / Folders.ANIMATEDIFF_MODELS))
 
@@ -272,6 +274,8 @@ try_mkdir(str(Path(folder_paths.models_dir) / Folders.ANIMATEDIFF_MODELS))
 folder_paths.add_model_folder_path(Folders.MOTION_LORA, str(Path(__file__).parent.parent / "motion_lora"))
 folder_paths.add_model_folder_path(Folders.MOTION_LORA, str(Path(folder_paths.models_dir) / Folders.MOTION_LORA))
 folder_paths.add_model_folder_path(Folders.MOTION_LORA, os.path.join(models_dir, "motion_lora"))
+if os.path.exists('/stable-diffusion-cache/models/AnimateDiff'):
+    folder_paths.add_model_folder_path(Folders.MOTION_LORA, '/stable-diffusion-cache/models/AnimateDiff')
 add_extension_to_folder_path(Folders.MOTION_LORA, folder_paths.supported_pt_extensions)
 try_mkdir(str(Path(folder_paths.models_dir) / Folders.MOTION_LORA))
 
