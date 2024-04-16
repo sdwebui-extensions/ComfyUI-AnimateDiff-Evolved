@@ -2,18 +2,21 @@ import comfy.sample as comfy_sample
 
 from .sampling import motion_sample_factory
 
-from .nodes_gen1 import (AnimateDiffLoaderGen1, LegacyAnimateDiffLoaderWithContext, AnimateDiffModelSettings,
-                         AnimateDiffModelSettingsSimple, AnimateDiffModelSettingsAdvanced, AnimateDiffModelSettingsAdvancedAttnStrengths)
-from .nodes_gen2 import UseEvolvedSamplingNode, ApplyAnimateDiffModelNode, ApplyAnimateDiffModelBasicNode, LoadAnimateDiffModelNode, ADKeyframeNode
+from .nodes_gen1 import (AnimateDiffLoaderGen1, LegacyAnimateDiffLoaderWithContext)
+from .nodes_gen2 import (UseEvolvedSamplingNode, ApplyAnimateDiffModelNode, ApplyAnimateDiffModelBasicNode, ApplyAnimateLCMI2VModel, ADKeyframeNode,
+                         LoadAnimateDiffModelNode, LoadAnimateLCMI2VModelNode, LoadAnimateDiffAndInjectI2VNode, UpscaleAndVaeEncode)
 from .nodes_multival import MultivalDynamicNode, MultivalScaledMaskNode
 from .nodes_sample import (FreeInitOptionsNode, NoiseLayerAddWeightedNode, SampleSettingsNode, NoiseLayerAddNode, NoiseLayerReplaceNode, IterationOptionsNode,
                            CustomCFGNode, CustomCFGKeyframeNode)
 from .nodes_sigma_schedule import (SigmaScheduleNode, RawSigmaScheduleNode, WeightedAverageSigmaScheduleNode, InterpolatedWeightedAverageSigmaScheduleNode, SplitAndCombineSigmaScheduleNode)
 from .nodes_context import (LegacyLoopedUniformContextOptionsNode, LoopedUniformContextOptionsNode, LoopedUniformViewOptionsNode, StandardUniformContextOptionsNode, StandardStaticContextOptionsNode, BatchedContextOptionsNode,
                             StandardStaticViewOptionsNode, StandardUniformViewOptionsNode, ViewAsContextOptionsNode)
-from .nodes_ad_settings import AnimateDiffSettingsNode, ManualAdjustPENode, SweetspotStretchPENode, FullStretchPENode
+from .nodes_ad_settings import (AnimateDiffSettingsNode, ManualAdjustPENode, SweetspotStretchPENode, FullStretchPENode,
+                                WeightAdjustAllAddNode, WeightAdjustAllMultNode, WeightAdjustIndivAddNode, WeightAdjustIndivMultNode,
+                                WeightAdjustIndivAttnAddNode, WeightAdjustIndivAttnMultNode)
 from .nodes_extras import AnimateDiffUnload, EmptyLatentImageLarge, CheckpointLoaderSimpleWithNoiseSelect
-from .nodes_deprecated import AnimateDiffLoader_Deprecated, AnimateDiffLoaderAdvanced_Deprecated, AnimateDiffCombine_Deprecated
+from .nodes_deprecated import (AnimateDiffLoader_Deprecated, AnimateDiffLoaderAdvanced_Deprecated, AnimateDiffCombine_Deprecated,
+                               AnimateDiffModelSettings, AnimateDiffModelSettingsSimple, AnimateDiffModelSettingsAdvanced, AnimateDiffModelSettingsAdvancedAttnStrengths)
 from .nodes_lora import AnimateDiffLoraLoader, MaskedLoraLoader
 
 from .logger import logger
@@ -54,6 +57,12 @@ NODE_CLASS_MAPPINGS = {
     "ADE_AdjustPESweetspotStretch": SweetspotStretchPENode,
     "ADE_AdjustPEFullStretch": FullStretchPENode,
     "ADE_AdjustPEManual": ManualAdjustPENode,
+    "ADE_AdjustWeightAllAdd": WeightAdjustAllAddNode,
+    "ADE_AdjustWeightAllMult": WeightAdjustAllMultNode,
+    "ADE_AdjustWeightIndivAdd": WeightAdjustIndivAddNode,
+    "ADE_AdjustWeightIndivMult": WeightAdjustIndivMultNode,
+    "ADE_AdjustWeightIndivAttnAdd": WeightAdjustIndivAttnAddNode,
+    "ADE_AdjustWeightIndivAttnMult": WeightAdjustIndivAttnMultNode,
     # Sample Settings
     "ADE_CustomCFG": CustomCFGNode,
     "ADE_CustomCFGKeyframe": CustomCFGKeyframeNode,
@@ -78,6 +87,11 @@ NODE_CLASS_MAPPINGS = {
     "ADE_ApplyAnimateDiffModelSimple": ApplyAnimateDiffModelBasicNode,
     "ADE_ApplyAnimateDiffModel": ApplyAnimateDiffModelNode,
     "ADE_LoadAnimateDiffModel": LoadAnimateDiffModelNode,
+    # AnimateLCM-I2V Nodes
+    "ADE_ApplyAnimateLCMI2VModel": ApplyAnimateLCMI2VModel,
+    "ADE_LoadAnimateLCMI2VModel": LoadAnimateLCMI2VModelNode,
+    "ADE_UpscaleAndVAEEncode": UpscaleAndVaeEncode,
+    "ADE_InjectI2VIntoAnimateDiffModel": LoadAnimateDiffAndInjectI2VNode,
     # MaskedLoraLoader
     #"ADE_MaskedLoadLora": MaskedLoraLoader,
     # Deprecated Nodes
@@ -116,6 +130,12 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ADE_AdjustPESweetspotStretch": "Adjust PE [Sweetspot Stretch] 🎭🅐🅓",
     "ADE_AdjustPEFullStretch": "Adjust PE [Full Stretch] 🎭🅐🅓",
     "ADE_AdjustPEManual": "Adjust PE [Manual] 🎭🅐🅓",
+    "ADE_AdjustWeightAllAdd": "Adjust Weight [All◆Add] 🎭🅐🅓",
+    "ADE_AdjustWeightAllMult": "Adjust Weight [All◆Mult] 🎭🅐🅓",
+    "ADE_AdjustWeightIndivAdd": "Adjust Weight [Indiv◆Add] 🎭🅐🅓",
+    "ADE_AdjustWeightIndivMult": "Adjust Weight [Indiv◆Mult] 🎭🅐🅓",
+    "ADE_AdjustWeightIndivAttnAdd": "Adjust Weight [Indiv-Attn◆Add] 🎭🅐🅓",
+    "ADE_AdjustWeightIndivAttnMult": "Adjust Weight [Indiv-Attn◆Mult] 🎭🅐🅓",
     # Sample Settings
     "ADE_CustomCFG": "Custom CFG 🎭🅐🅓",
     "ADE_CustomCFGKeyframe": "Custom CFG Keyframe 🎭🅐🅓",
@@ -131,19 +151,24 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     # Gen1 Nodes
     "ADE_AnimateDiffLoaderGen1": "AnimateDiff Loader 🎭🅐🅓①",
     "ADE_AnimateDiffLoaderWithContext": "AnimateDiff Loader [Legacy] 🎭🅐🅓①",
-    "ADE_AnimateDiffModelSettings_Release": "[DEPR] Motion Model Settings 🎭🅐🅓①",
-    "ADE_AnimateDiffModelSettingsSimple": "[DEPR] Motion Model Settings (Simple) 🎭🅐🅓①",
-    "ADE_AnimateDiffModelSettings": "[DEPR] Motion Model Settings (Advanced) 🎭🅐🅓①",
-    "ADE_AnimateDiffModelSettingsAdvancedAttnStrengths": "[DEPR] Motion Model Settings (Adv. Attn) 🎭🅐🅓①",
+    "ADE_AnimateDiffModelSettings_Release": "🚫[DEPR] Motion Model Settings 🎭🅐🅓①",
+    "ADE_AnimateDiffModelSettingsSimple": "🚫[DEPR] Motion Model Settings (Simple) 🎭🅐🅓①",
+    "ADE_AnimateDiffModelSettings": "🚫[DEPR] Motion Model Settings (Advanced) 🎭🅐🅓①",
+    "ADE_AnimateDiffModelSettingsAdvancedAttnStrengths": "🚫[DEPR] Motion Model Settings (Adv. Attn) 🎭🅐🅓①",
     # Gen2 Nodes
     "ADE_UseEvolvedSampling": "Use Evolved Sampling 🎭🅐🅓②",
     "ADE_ApplyAnimateDiffModelSimple": "Apply AnimateDiff Model 🎭🅐🅓②",
     "ADE_ApplyAnimateDiffModel": "Apply AnimateDiff Model (Adv.) 🎭🅐🅓②",
     "ADE_LoadAnimateDiffModel": "Load AnimateDiff Model 🎭🅐🅓②",
+    # AnimateLCM-I2V Nodes
+    "ADE_ApplyAnimateLCMI2VModel": "Apply AnimateLCM-I2V Model 🎭🅐🅓②",
+    "ADE_LoadAnimateLCMI2VModel": "Load AnimateLCM-I2V Model 🎭🅐🅓②",
+    "ADE_UpscaleAndVAEEncode": "Scale Ref Image and VAE Encode 🎭🅐🅓②",
+    "ADE_InjectI2VIntoAnimateDiffModel": "🧪Inject I2V into AnimateDiff Model 🎭🅐🅓②",
     # MaskedLoraLoader
     #"ADE_MaskedLoadLora": "Load LoRA (Masked) 🎭🅐🅓",
     # Deprecated Nodes
-    "AnimateDiffLoaderV1": "AnimateDiff Loader [DEPRECATED] 🎭🅐🅓",
-    "ADE_AnimateDiffLoaderV1Advanced": "AnimateDiff Loader (Advanced) [DEPRECATED] 🎭🅐🅓",
-    "ADE_AnimateDiffCombine": "AnimateDiff Combine [DEPRECATED, Use Video Combine (VHS) Instead!] 🎭🅐🅓",
+    "AnimateDiffLoaderV1": "🚫AnimateDiff Loader [DEPRECATED] 🎭🅐🅓",
+    "ADE_AnimateDiffLoaderV1Advanced": "🚫AnimateDiff Loader (Advanced) [DEPRECATED] 🎭🅐🅓",
+    "ADE_AnimateDiffCombine": "🚫AnimateDiff Combine [DEPRECATED, Use Video Combine (VHS) Instead!] 🎭🅐🅓",
 }

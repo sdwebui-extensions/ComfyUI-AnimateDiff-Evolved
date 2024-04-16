@@ -8,9 +8,14 @@ from einops import rearrange
 
 import comfy.ldm.modules.attention as attention
 from comfy.ldm.modules.diffusionmodules import openaimodel
-import comfy.model_management as model_management
+import comfy.model_management
 import comfy.samplers
 import comfy.sample
+SAMPLE_FALLBACK = False
+try:
+    import comfy.sampler_helpers
+except ImportError:
+    SAMPLE_FALLBACK = True
 import comfy.utils
 from comfy.controlnet import ControlBase
 import comfy.ops
@@ -147,6 +152,18 @@ def get_additional_models_factory(orig_get_additional_models: Callable, motion_m
         # TODO: account for inference memory as well?
         return models, inference_memory
     return get_additional_models_with_motion
+
+def apply_model_factory(orig_apply_model: Callable):
+    def apply_model_ade_wrapper(self, *args, **kwargs):
+        x: Tensor = args[0]
+        cond_or_uncond = kwargs["transformer_options"]["cond_or_uncond"]
+        ad_params = kwargs["transformer_options"]["ad_params"]
+        if ADGS.motion_models is not None:
+            for motion_model in ADGS.motion_models.models:
+                motion_model.prepare_img_features(x=x, cond_or_uncond=cond_or_uncond, ad_params=ad_params, latent_format=self.latent_format)
+        del x
+        return orig_apply_model(*args, **kwargs)
+    return apply_model_ade_wrapper
 ######################################################################
 ##################################################################################
 
@@ -202,8 +219,11 @@ class FunctionInjectionHolder:
         self.orig_groupnorm_forward = torch.nn.GroupNorm.forward # used to normalize latents to remove "flickering" of colors/brightness between frames
         self.orig_groupnorm_manual_cast_forward = comfy.ops.manual_cast.GroupNorm.forward_comfy_cast_weights
         self.orig_sampling_function = comfy.samplers.sampling_function # used to support sliding context windows in samplers
-        self.orig_prepare_mask = comfy.sample.prepare_mask
-        self.orig_get_additional_models = comfy.sample.get_additional_models
+        if SAMPLE_FALLBACK:  # for backwards compatibility, for now
+            self.orig_get_additional_models = comfy.sample.get_additional_models
+        else:
+            self.orig_get_additional_models = comfy.sampler_helpers.get_additional_models
+        self.orig_apply_model = model.model.apply_model
         # Inject Functions
         openaimodel.forward_timestep_embed = forward_timestep_embed_factory()
         if params.unlimited_area_hack:
@@ -221,10 +241,17 @@ class FunctionInjectionHolder:
                         model.model.memory_required = unlimited_memory_required
                 except Exception:
                     pass
+            # if img_encoder present, inject apply_model to handle img_latents correctly
+            for motion_model in model.motion_models:
+                if motion_model.model.img_encoder != None:
+                    model.model.apply_model = apply_model_factory(self.orig_apply_model).__get__(model.model, type(model.model))
+                    break
             del info
         comfy.samplers.sampling_function = evolved_sampling_function
-        comfy.sample.prepare_mask = prepare_mask_ad
-        comfy.sample.get_additional_models = get_additional_models_factory(self.orig_get_additional_models, model.motion_models)
+        if SAMPLE_FALLBACK:  # for backwards compatibility, for now
+            comfy.sample.get_additional_models = get_additional_models_factory(self.orig_get_additional_models, model.motion_models)
+        else:
+            comfy.sampler_helpers.get_additional_models = get_additional_models_factory(self.orig_get_additional_models, model.motion_models)
 
     def restore_functions(self, model: ModelPatcherAndInjector):
         # Restoration
@@ -234,8 +261,11 @@ class FunctionInjectionHolder:
             torch.nn.GroupNorm.forward = self.orig_groupnorm_forward
             comfy.ops.manual_cast.GroupNorm.forward_comfy_cast_weights = self.orig_groupnorm_manual_cast_forward
             comfy.samplers.sampling_function = self.orig_sampling_function
-            comfy.sample.prepare_mask = self.orig_prepare_mask
-            comfy.sample.get_additional_models = self.orig_get_additional_models
+            if SAMPLE_FALLBACK:  # for backwards compatibility, for now
+                comfy.sample.get_additional_models = self.orig_get_additional_models
+            else:
+                comfy.sampler_helpers.get_additional_models = self.orig_get_additional_models
+            model.model.apply_model = self.orig_apply_model
         except AttributeError:
             logger.error("Encountered AttributeError while attempting to restore functions - likely, an error occured while trying " + \
                          "to save original functions before injection, and a more specific error was thrown by ComfyUI.")
@@ -313,15 +343,21 @@ def motion_sample_factory(orig_comfy_sample: Callable, is_custom: bool=False) ->
             iter_kwargs = {}
             if iter_opts.need_sampler:
                 # -5 for sampler_name (not custom) and sampler (custom)
-                model_management.load_model_gpu(model)
                 if is_custom:
                     iter_kwargs[IterationOptions.SAMPLER] = None #args[-5]
                 else:
+                    if SAMPLE_FALLBACK:  # backwards compatibility, for now
+                        # in older comfy, model needs to be loaded to get proper model_sampling to be used for sigmas
+                        comfy.model_management.load_model_gpu(model)
+                        iter_model = model.model
+                    else:
+                        iter_model = model
                     iter_kwargs[IterationOptions.SAMPLER] = comfy.samplers.KSampler(
-                        model.model, steps=999, #steps=args[-7],
+                        iter_model, steps=999, #steps=args[-7],
                         device=model.current_device, sampler=args[-5],
                         scheduler=args[-4], denoise=kwargs.get("denoise", None),
                         model_options=model.model_options)
+                    del iter_model
 
             for curr_i in range(iter_opts.iterations):
                 # handle GLOBALSTATE vars and step tally
@@ -352,6 +388,9 @@ def motion_sample_factory(orig_comfy_sample: Callable, is_custom: bool=False) ->
             del cached_noise
             # reset global state
             ADGS.reset()
+            # clean motion_models
+            if model.motion_models is not None:
+                model.motion_models.cleanup()
             # restore injected functions
             function_injections.restore_functions(model)
             del function_injections
@@ -380,23 +419,29 @@ def evolved_sampling_function(model, x, timestep, uncond, cond, cond_scale, mode
     model_options["transformer_options"]["ad_params"] = ADGS.create_exposed_params()
 
     if not ADGS.is_using_sliding_context():
-        cond_pred, uncond_pred = comfy.samplers.calc_cond_uncond_batch(model, cond, uncond_, x, timestep, model_options)
+        if hasattr(comfy.samplers, "calc_cond_batch"):
+            cond_pred, uncond_pred = comfy.samplers.calc_cond_batch(model, [cond, uncond_], x, timestep, model_options)
+        else:
+            cond_pred, uncond_pred = comfy.samplers.calc_cond_uncond_batch(model, cond, uncond_, x, timestep, model_options)
     else:
         cond_pred, uncond_pred = sliding_calc_cond_uncond_batch(model, cond, uncond_, x, timestep, model_options)
 
-    if "sampler_cfg_function" in model_options:
-        args = {"cond": x - cond_pred, "uncond": x - uncond_pred, "cond_scale": cond_scale, "timestep": timestep, "input": x, "sigma": timestep,
-                "cond_denoised": cond_pred, "uncond_denoised": uncond_pred, "model": model, "model_options": model_options}
-        cfg_result = x - model_options["sampler_cfg_function"](args)
-    else:
-        cfg_result = uncond_pred + (cond_pred - uncond_pred) * cond_scale
+    if hasattr(comfy.samplers, "cfg_function"):
+        return comfy.samplers.cfg_function(model, cond_pred, uncond_pred, cond_scale, x, timestep, model_options, cond, uncond)
+    else: # for backwards compatibility, for now
+        if "sampler_cfg_function" in model_options:
+            args = {"cond": x - cond_pred, "uncond": x - uncond_pred, "cond_scale": cond_scale, "timestep": timestep, "input": x, "sigma": timestep,
+                    "cond_denoised": cond_pred, "uncond_denoised": uncond_pred, "model": model, "model_options": model_options}
+            cfg_result = x - model_options["sampler_cfg_function"](args)
+        else:
+            cfg_result = uncond_pred + (cond_pred - uncond_pred) * cond_scale
 
-    for fn in model_options.get("sampler_post_cfg_function", []):
-        args = {"denoised": cfg_result, "cond": cond, "uncond": uncond, "model": model, "uncond_denoised": uncond_pred, "cond_denoised": cond_pred,
-                "sigma": timestep, "model_options": model_options, "input": x}
-        cfg_result = fn(args)
+        for fn in model_options.get("sampler_post_cfg_function", []):
+            args = {"denoised": cfg_result, "cond": cond, "uncond": uncond, "model": model, "uncond_denoised": uncond_pred, "cond_denoised": cond_pred,
+                    "sigma": timestep, "model_options": model_options, "input": x}
+            cfg_result = fn(args)
 
-    return cfg_result
+        return cfg_result
 
 
 # sliding_calc_cond_uncond_batch inspired by ashen's initial hack for 16-frame sliding context:
@@ -494,7 +539,10 @@ def sliding_calc_cond_uncond_batch(model, cond, uncond, x_in: Tensor, timestep, 
         sub_cond = get_resized_cond(cond, full_idxs, len(ctx_idxs)) if cond is not None else None
         sub_uncond = get_resized_cond(uncond, full_idxs, len(ctx_idxs)) if uncond is not None else None
 
-        sub_cond_out, sub_uncond_out = comfy.samplers.calc_cond_uncond_batch(model, sub_cond, sub_uncond, sub_x, sub_timestep, model_options)
+        if hasattr(comfy.samplers, "calc_cond_batch"):
+            sub_cond_out, sub_uncond_out = comfy.samplers.calc_cond_batch(model, [sub_cond, sub_uncond], sub_x, sub_timestep, model_options)
+        else:
+            sub_cond_out, sub_uncond_out = comfy.samplers.calc_cond_uncond_batch(model, sub_cond, sub_uncond, sub_x, sub_timestep, model_options)
 
         if ADGS.params.context_options.fuse_method == ContextFuseMethod.RELATIVE:
             full_length = ADGS.params.full_length
