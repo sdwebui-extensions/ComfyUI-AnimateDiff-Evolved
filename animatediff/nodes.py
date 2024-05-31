@@ -3,9 +3,21 @@ import comfy.sample as comfy_sample
 from .sampling import motion_sample_factory
 
 from .nodes_gen1 import (AnimateDiffLoaderGen1, LegacyAnimateDiffLoaderWithContext)
-from .nodes_gen2 import (UseEvolvedSamplingNode, ApplyAnimateDiffModelNode, ApplyAnimateDiffModelBasicNode, ApplyAnimateLCMI2VModel, ADKeyframeNode,
-                         LoadAnimateDiffModelNode, LoadAnimateLCMI2VModelNode, LoadAnimateDiffAndInjectI2VNode, UpscaleAndVaeEncode)
+from .nodes_gen2 import (UseEvolvedSamplingNode, ApplyAnimateDiffModelNode, ApplyAnimateDiffModelBasicNode, ADKeyframeNode,
+                         LoadAnimateDiffModelNode)
+from .nodes_animatelcmi2v import (ApplyAnimateLCMI2VModel, LoadAnimateLCMI2VModelNode, LoadAnimateDiffAndInjectI2VNode, UpscaleAndVaeEncode)
+from .nodes_cameractrl import (LoadAnimateDiffModelWithCameraCtrl, ApplyAnimateDiffWithCameraCtrl, CameraCtrlADKeyframeNode, LoadCameraPoses,
+                               CameraCtrlPoseBasic, CameraCtrlPoseCombo, CameraCtrlPoseAdvanced, CameraCtrlManualAppendPose,
+                               CameraCtrlReplaceCameraParameters, CameraCtrlSetOriginalAspectRatio)
 from .nodes_multival import MultivalDynamicNode, MultivalScaledMaskNode
+from .nodes_conditioning import (MaskableLoraLoader, MaskableLoraLoaderModelOnly, MaskableSDModelLoader, MaskableSDModelLoaderModelOnly,
+                                 SetModelLoraHook, SetClipLoraHook,
+                                 CombineLoraHooks, CombineLoraHookFourOptional, CombineLoraHookEightOptional,
+                                 PairedConditioningSetMaskHooked, ConditioningSetMaskHooked,
+                                 PairedConditioningSetMaskAndCombineHooked, ConditioningSetMaskAndCombineHooked,
+                                 PairedConditioningSetUnmaskedAndCombineHooked, ConditioningSetUnmaskedAndCombineHooked,
+                                 ConditioningTimestepsNode, SetLoraHookKeyframes,
+                                 CreateLoraHookKeyframe, CreateLoraHookKeyframeInterpolation, CreateLoraHookKeyframeFromStrengthList)
 from .nodes_sample import (FreeInitOptionsNode, NoiseLayerAddWeightedNode, SampleSettingsNode, NoiseLayerAddNode, NoiseLayerReplaceNode, IterationOptionsNode,
                            CustomCFGNode, CustomCFGKeyframeNode)
 from .nodes_sigma_schedule import (SigmaScheduleNode, RawSigmaScheduleNode, WeightedAverageSigmaScheduleNode, InterpolatedWeightedAverageSigmaScheduleNode, SplitAndCombineSigmaScheduleNode)
@@ -17,7 +29,7 @@ from .nodes_ad_settings import (AnimateDiffSettingsNode, ManualAdjustPENode, Swe
 from .nodes_extras import AnimateDiffUnload, EmptyLatentImageLarge, CheckpointLoaderSimpleWithNoiseSelect
 from .nodes_deprecated import (AnimateDiffLoader_Deprecated, AnimateDiffLoaderAdvanced_Deprecated, AnimateDiffCombine_Deprecated,
                                AnimateDiffModelSettings, AnimateDiffModelSettingsSimple, AnimateDiffModelSettingsAdvanced, AnimateDiffModelSettingsAdvancedAttnStrengths)
-from .nodes_lora import AnimateDiffLoraLoader, MaskedLoraLoader
+from .nodes_lora import AnimateDiffLoraLoader
 
 from .logger import logger
 
@@ -48,6 +60,27 @@ NODE_CLASS_MAPPINGS = {
     # Iteration Opts
     "ADE_IterationOptsDefault": IterationOptionsNode,
     "ADE_IterationOptsFreeInit": FreeInitOptionsNode,
+    # Conditioning
+    "ADE_RegisterLoraHook": MaskableLoraLoader,
+    "ADE_RegisterLoraHookModelOnly": MaskableLoraLoaderModelOnly,
+    "ADE_RegisterModelAsLoraHook": MaskableSDModelLoader,
+    "ADE_RegisterModelAsLoraHookModelOnly": MaskableSDModelLoaderModelOnly,
+    "ADE_CombineLoraHooks": CombineLoraHooks,
+    "ADE_CombineLoraHooksFour": CombineLoraHookFourOptional,
+    "ADE_CombineLoraHooksEight": CombineLoraHookEightOptional,
+    "ADE_SetLoraHookKeyframe": SetLoraHookKeyframes,
+    "ADE_AttachLoraHookToCLIP": SetClipLoraHook,
+    "ADE_LoraHookKeyframe": CreateLoraHookKeyframe,
+    "ADE_LoraHookKeyframeInterpolation": CreateLoraHookKeyframeInterpolation,
+    "ADE_LoraHookKeyframeFromStrengthList": CreateLoraHookKeyframeFromStrengthList,
+    "ADE_AttachLoraHookToConditioning": SetModelLoraHook,
+    "ADE_PairedConditioningSetMask": PairedConditioningSetMaskHooked,
+    "ADE_ConditioningSetMask": ConditioningSetMaskHooked,
+    "ADE_PairedConditioningSetMaskAndCombine": PairedConditioningSetMaskAndCombineHooked,
+    "ADE_ConditioningSetMaskAndCombine": ConditioningSetMaskAndCombineHooked,
+    "ADE_PairedConditioningSetUnmaskedAndCombine": PairedConditioningSetUnmaskedAndCombineHooked,
+    "ADE_ConditioningSetUnmaskedAndCombine": ConditioningSetUnmaskedAndCombineHooked,
+    "ADE_TimestepsConditioning": ConditioningTimestepsNode,
     # Noise Layer Nodes
     "ADE_NoiseLayerAdd": NoiseLayerAddNode,
     "ADE_NoiseLayerAddWeighted": NoiseLayerAddWeightedNode,
@@ -78,10 +111,6 @@ NODE_CLASS_MAPPINGS = {
     # Gen1 Nodes
     "ADE_AnimateDiffLoaderGen1": AnimateDiffLoaderGen1,
     "ADE_AnimateDiffLoaderWithContext": LegacyAnimateDiffLoaderWithContext,
-    "ADE_AnimateDiffModelSettings_Release": AnimateDiffModelSettings,
-    "ADE_AnimateDiffModelSettingsSimple": AnimateDiffModelSettingsSimple,
-    "ADE_AnimateDiffModelSettings": AnimateDiffModelSettingsAdvanced,
-    "ADE_AnimateDiffModelSettingsAdvancedAttnStrengths": AnimateDiffModelSettingsAdvancedAttnStrengths,
     # Gen2 Nodes
     "ADE_UseEvolvedSampling": UseEvolvedSamplingNode,
     "ADE_ApplyAnimateDiffModelSimple": ApplyAnimateDiffModelBasicNode,
@@ -92,12 +121,27 @@ NODE_CLASS_MAPPINGS = {
     "ADE_LoadAnimateLCMI2VModel": LoadAnimateLCMI2VModelNode,
     "ADE_UpscaleAndVAEEncode": UpscaleAndVaeEncode,
     "ADE_InjectI2VIntoAnimateDiffModel": LoadAnimateDiffAndInjectI2VNode,
+    # CameraCtrl Nodes
+    "ADE_ApplyAnimateDiffModelWithCameraCtrl": ApplyAnimateDiffWithCameraCtrl,
+    "ADE_LoadAnimateDiffModelWithCameraCtrl": LoadAnimateDiffModelWithCameraCtrl,
+    "ADE_CameraCtrlAnimateDiffKeyframe": CameraCtrlADKeyframeNode,
+    "ADE_LoadCameraPoses": LoadCameraPoses,
+    "ADE_CameraPoseBasic": CameraCtrlPoseBasic,
+    "ADE_CameraPoseCombo": CameraCtrlPoseCombo,
+    "ADE_CameraPoseAdvanced": CameraCtrlPoseAdvanced,
+    "ADE_CameraManualPoseAppend": CameraCtrlManualAppendPose,
+    "ADE_ReplaceCameraParameters": CameraCtrlReplaceCameraParameters,
+    "ADE_ReplaceOriginalPoseAspectRatio": CameraCtrlSetOriginalAspectRatio,
     # MaskedLoraLoader
     #"ADE_MaskedLoadLora": MaskedLoraLoader,
     # Deprecated Nodes
     "AnimateDiffLoaderV1": AnimateDiffLoader_Deprecated,
     "ADE_AnimateDiffLoaderV1Advanced": AnimateDiffLoaderAdvanced_Deprecated,
     "ADE_AnimateDiffCombine": AnimateDiffCombine_Deprecated,
+    "ADE_AnimateDiffModelSettings_Release": AnimateDiffModelSettings,
+    "ADE_AnimateDiffModelSettingsSimple": AnimateDiffModelSettingsSimple,
+    "ADE_AnimateDiffModelSettings": AnimateDiffModelSettingsAdvanced,
+    "ADE_AnimateDiffModelSettingsAdvancedAttnStrengths": AnimateDiffModelSettingsAdvancedAttnStrengths,
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
     # Unencapsulated
@@ -121,6 +165,27 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     # Iteration Opts
     "ADE_IterationOptsDefault": "Default Iteration Options 🎭🅐🅓",
     "ADE_IterationOptsFreeInit": "FreeInit Iteration Options 🎭🅐🅓",
+    # Conditioning
+    "ADE_RegisterLoraHook": "Register LoRA Hook 🎭🅐🅓",
+    "ADE_RegisterLoraHookModelOnly": "Register LoRA Hook (Model Only) 🎭🅐🅓",
+    "ADE_RegisterModelAsLoraHook": "Register Model as LoRA Hook 🎭🅐🅓",
+    "ADE_RegisterModelAsLoraHookModelOnly": "Register Model as LoRA Hook (MO) 🎭🅐🅓",
+    "ADE_CombineLoraHooks": "Combine LoRA Hooks [2] 🎭🅐🅓",
+    "ADE_CombineLoraHooksFour": "Combine LoRA Hooks [4] 🎭🅐🅓",
+    "ADE_CombineLoraHooksEight": "Combine LoRA Hooks [8] 🎭🅐🅓",
+    "ADE_SetLoraHookKeyframe": "Set LoRA Hook Keyframes 🎭🅐🅓",
+    "ADE_AttachLoraHookToCLIP": "Set CLIP LoRA Hook 🎭🅐🅓",
+    "ADE_LoraHookKeyframe": "LoRA Hook Keyframe 🎭🅐🅓",
+    "ADE_LoraHookKeyframeInterpolation": "LoRA Hook Keyframes Interpolation 🎭🅐🅓",
+    "ADE_LoraHookKeyframeFromStrengthList": "LoRA Hook Keyframes From List 🎭🅐🅓",
+    "ADE_AttachLoraHookToConditioning": "Set Model LoRA Hook 🎭🅐🅓",
+    "ADE_PairedConditioningSetMask": "Set Props on Conds 🎭🅐🅓",
+    "ADE_ConditioningSetMask": "Set Props on Cond 🎭🅐🅓",
+    "ADE_PairedConditioningSetMaskAndCombine": "Set Props and Combine Conds 🎭🅐🅓",
+    "ADE_ConditioningSetMaskAndCombine": "Set Props and Combine Cond 🎭🅐🅓",
+    "ADE_PairedConditioningSetUnmaskedAndCombine": "Set Unmasked Conds 🎭🅐🅓",
+    "ADE_ConditioningSetUnmaskedAndCombine": "Set Unmasked Cond 🎭🅐🅓",
+    "ADE_TimestepsConditioning": "Timesteps Conditioning 🎭🅐🅓",
     # Noise Layer Nodes
     "ADE_NoiseLayerAdd": "Noise Layer [Add] 🎭🅐🅓",
     "ADE_NoiseLayerAddWeighted": "Noise Layer [Add Weighted] 🎭🅐🅓",
@@ -151,10 +216,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     # Gen1 Nodes
     "ADE_AnimateDiffLoaderGen1": "AnimateDiff Loader 🎭🅐🅓①",
     "ADE_AnimateDiffLoaderWithContext": "AnimateDiff Loader [Legacy] 🎭🅐🅓①",
-    "ADE_AnimateDiffModelSettings_Release": "🚫[DEPR] Motion Model Settings 🎭🅐🅓①",
-    "ADE_AnimateDiffModelSettingsSimple": "🚫[DEPR] Motion Model Settings (Simple) 🎭🅐🅓①",
-    "ADE_AnimateDiffModelSettings": "🚫[DEPR] Motion Model Settings (Advanced) 🎭🅐🅓①",
-    "ADE_AnimateDiffModelSettingsAdvancedAttnStrengths": "🚫[DEPR] Motion Model Settings (Adv. Attn) 🎭🅐🅓①",
     # Gen2 Nodes
     "ADE_UseEvolvedSampling": "Use Evolved Sampling 🎭🅐🅓②",
     "ADE_ApplyAnimateDiffModelSimple": "Apply AnimateDiff Model 🎭🅐🅓②",
@@ -165,10 +226,25 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ADE_LoadAnimateLCMI2VModel": "Load AnimateLCM-I2V Model 🎭🅐🅓②",
     "ADE_UpscaleAndVAEEncode": "Scale Ref Image and VAE Encode 🎭🅐🅓②",
     "ADE_InjectI2VIntoAnimateDiffModel": "🧪Inject I2V into AnimateDiff Model 🎭🅐🅓②",
+    # CameraCtrl Nodes
+    "ADE_ApplyAnimateDiffModelWithCameraCtrl": "Apply AnimateDiff+CameraCtrl Model 🎭🅐🅓②",
+    "ADE_LoadAnimateDiffModelWithCameraCtrl": "Load AnimateDiff+CameraCtrl Model 🎭🅐🅓②",
+    "ADE_CameraCtrlAnimateDiffKeyframe": "AnimateDiff+CameraCtrl Keyframe 🎭🅐🅓",
+    "ADE_LoadCameraPoses": "Load CameraCtrl Poses (File) 🎭🅐🅓②",
+    "ADE_CameraPoseBasic": "Create CameraCtrl Poses 🎭🅐🅓②",
+    "ADE_CameraPoseCombo": "Create CameraCtrl Poses (Combo) 🎭🅐🅓②",
+    "ADE_CameraPoseAdvanced": "Create CameraCtrl Poses (Adv.) 🎭🅐🅓②",
+    "ADE_CameraManualPoseAppend": "Manual Append CameraCtrl Poses 🎭🅐🅓②",
+    "ADE_ReplaceCameraParameters": "Replace Camera Parameters 🎭🅐🅓②",
+    "ADE_ReplaceOriginalPoseAspectRatio": "Replace Orig. Pose Aspect Ratio 🎭🅐🅓②",
     # MaskedLoraLoader
     #"ADE_MaskedLoadLora": "Load LoRA (Masked) 🎭🅐🅓",
     # Deprecated Nodes
     "AnimateDiffLoaderV1": "🚫AnimateDiff Loader [DEPRECATED] 🎭🅐🅓",
     "ADE_AnimateDiffLoaderV1Advanced": "🚫AnimateDiff Loader (Advanced) [DEPRECATED] 🎭🅐🅓",
     "ADE_AnimateDiffCombine": "🚫AnimateDiff Combine [DEPRECATED, Use Video Combine (VHS) Instead!] 🎭🅐🅓",
+    "ADE_AnimateDiffModelSettings_Release": "🚫[DEPR] Motion Model Settings 🎭🅐🅓①",
+    "ADE_AnimateDiffModelSettingsSimple": "🚫[DEPR] Motion Model Settings (Simple) 🎭🅐🅓①",
+    "ADE_AnimateDiffModelSettings": "🚫[DEPR] Motion Model Settings (Advanced) 🎭🅐🅓①",
+    "ADE_AnimateDiffModelSettingsAdvancedAttnStrengths": "🚫[DEPR] Motion Model Settings (Adv. Attn) 🎭🅐🅓①",
 }
