@@ -34,6 +34,7 @@ class ApplyAnimateLCMI2VModel:
                 "effect_multival": ("MULTIVAL",),
                 "ad_keyframes": ("AD_KEYFRAMES",),
                 "prev_m_models": ("M_MODELS",),
+                "autosize": ("ADEAUTOSIZE", {"padding": 70}),
             }
         }
     
@@ -99,6 +100,7 @@ class LoadAnimateDiffAndInjectI2VNode:
             },
             "optional": {
                 "ad_settings": ("AD_SETTINGS",),
+                "deprecation_warning": ("ADEWARN", {"text": "Experimental. Don't expect to work.", "warn_type": "experimental", "color": "#CFC"}),
             }
         }
     
