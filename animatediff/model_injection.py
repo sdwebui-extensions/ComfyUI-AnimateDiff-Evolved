@@ -36,7 +36,7 @@ from .sample_settings import SampleSettings, SeedNoiseGeneration
 class ModelPatcherAndInjector(ModelPatcher):
     def __init__(self, m: ModelPatcher):
         # replicate ModelPatcher.clone() to initialize ModelPatcherAndInjector
-        super().__init__(m.model, m.load_device, m.offload_device, m.size, m.current_device, weight_inplace_update=m.weight_inplace_update)
+        super().__init__(m.model, m.load_device, m.offload_device, m.size, weight_inplace_update=m.weight_inplace_update)
         self.patches = {}
         for k in m.patches:
             self.patches[k] = m.patches[k][:]
@@ -439,7 +439,7 @@ class CLIPWithHooks(CLIP):
 class ModelPatcherCLIPHooks(ModelPatcher):
     def __init__(self, m: ModelPatcher):
         # replicate ModelPatcher.clone() to initialize
-        super().__init__(m.model, m.load_device, m.offload_device, m.size, m.current_device, weight_inplace_update=m.weight_inplace_update)
+        super().__init__(m.model, m.load_device, m.offload_device, m.size, weight_inplace_update=m.weight_inplace_update)
         self.patches = {}
         for k in m.patches:
             self.patches[k] = m.patches[k][:]
@@ -751,6 +751,7 @@ class MotionModelPatcher(ModelPatcher):
         self.current_used_steps = 0
         self.current_keyframe: ADKeyframe = None
         self.current_index = -1
+        self.previous_t = -1
         self.current_scale: Union[float, Tensor] = None
         self.current_effect: Union[float, Tensor] = None
         self.current_cameractrl_effect: Union[float, Tensor] = None
@@ -803,6 +804,9 @@ class MotionModelPatcher(ModelPatcher):
 
     def prepare_current_keyframe(self, x: Tensor, t: Tensor):
         curr_t: float = t[0]
+        # if curr_t was previous_t, then do nothing (already accounted for this step)
+        if curr_t == self.previous_t:
+            return
         prev_index = self.current_index
         # if met guaranteed steps, look for next keyframe in case need to switch
         if self.current_keyframe is None or self.current_used_steps >= self.current_keyframe.guarantee_steps:
@@ -862,6 +866,8 @@ class MotionModelPatcher(ModelPatcher):
                 self.was_within_range = True
         # update steps current keyframe is used
         self.current_used_steps += 1
+        # update previous_t
+        self.previous_t = curr_t
 
     def prepare_img_features(self, x: Tensor, cond_or_uncond: list[int], ad_params: dict[str], latent_format):
         # if no img_encoder, done
@@ -1006,6 +1012,7 @@ class MotionModelPatcher(ModelPatcher):
         self.current_used_steps = 0
         self.current_keyframe = None
         self.current_index = -1
+        self.previous_t = -1
         self.current_scale = None
         self.current_effect = None
         self.combined_scale = None
@@ -1016,7 +1023,7 @@ class MotionModelPatcher(ModelPatcher):
 
     def clone(self):
         # normal ModelPatcher clone actions
-        n = MotionModelPatcher(self.model, self.load_device, self.offload_device, self.size, self.current_device, weight_inplace_update=self.weight_inplace_update)
+        n = MotionModelPatcher(self.model, self.load_device, self.offload_device, self.size, weight_inplace_update=self.weight_inplace_update)
         n.patches = {}
         for k in self.patches:
             n.patches[k] = self.patches[k][:]
@@ -1124,7 +1131,7 @@ class MotionModelGroup:
 
 
 def get_vanilla_model_patcher(m: ModelPatcher) -> ModelPatcher:
-    model = ModelPatcher(m.model, m.load_device, m.offload_device, m.size, m.current_device, weight_inplace_update=m.weight_inplace_update)
+    model = ModelPatcher(m.model, m.load_device, m.offload_device, m.size, weight_inplace_update=m.weight_inplace_update)
     model.patches = {}
     for k in m.patches:
         model.patches[k] = m.patches[k][:]
