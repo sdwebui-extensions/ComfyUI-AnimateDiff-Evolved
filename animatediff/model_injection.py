@@ -66,6 +66,12 @@ class ModelPatcherAndInjector(ModelPatcher):
         self.motion_injection_params: InjectionParams = InjectionParams()
         self.sample_settings: SampleSettings = SampleSettings()
         self.motion_models: MotionModelGroup = None
+        # backwards-compatible calculate_weight
+        if hasattr(comfy.lora, "calculate_weight"):
+            self.do_calculate_weight = comfy.lora.calculate_weight
+        else:
+            self.do_calculate_weight = self.calculate_weight
+
     
     def clone(self, hooks_only=False):
         cloned = ModelPatcherAndInjector(self)
@@ -379,7 +385,7 @@ class ModelPatcherAndInjector(ModelPatcher):
 
         # TODO: handle model_params_lowvram stuff if necessary
         temp_weight = comfy.model_management.cast_to_device(weight, weight.device, torch.float32, copy=True)
-        out_weight = self.calculate_weight(combined_patches[key], temp_weight, key).to(weight.dtype)
+        out_weight = self.do_calculate_weight(combined_patches[key], temp_weight, key).to(weight.dtype)
         if self.lora_hook_mode == LoraHookMode.MAX_SPEED:
             self.cached_hooked_patches.setdefault(lora_hooks, {})
             self.cached_hooked_patches[lora_hooks][key] = out_weight
@@ -809,6 +815,7 @@ class MotionModelPatcher(ModelPatcher):
         to_return = super().load(device_to=device_to, lowvram_model_memory=lowvram_model_memory, *args, **kwargs)
         if lowvram_model_memory > 0:
             self._patch_lowvram_extras(device_to=device_to)
+        self._handle_float8_pe_tensors()
         return to_return
 
     def _patch_lowvram_extras(self, device_to=None):
@@ -827,6 +834,17 @@ class MotionModelPatcher(ModelPatcher):
             self.patch_weight_to_device(key, device_to)
             if device_to is not None:
                 comfy.utils.set_attr(self.model, key, comfy.utils.get_attr(self.model, key).to(device_to))
+
+    def _handle_float8_pe_tensors(self):
+        remaining_tensors = list(self.model.state_dict().keys())
+        pe_tensors = [x for x in remaining_tensors if '.pe' in x]
+        is_first = True
+        for key in pe_tensors:
+            if is_first:
+                is_first = False
+                if comfy.utils.get_attr(self.model, key).dtype not in [torch.float8_e5m2, torch.float8_e4m3fn]:
+                    break
+            comfy.utils.set_attr(self.model, key, comfy.utils.get_attr(self.model, key).half())
 
     def pre_run(self, model: ModelPatcherAndInjector):
         self.cleanup()
