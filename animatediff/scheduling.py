@@ -4,7 +4,7 @@ from typing import Union
 import torch
 from torch import Tensor
 import torch.nn.functional as F
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from comfy.sd import CLIP
 from comfy.utils import ProgressBar
@@ -110,6 +110,7 @@ class PromptOptions:
     append_text: str = ''
     values_replace: dict[str, list[float]] = None
     print_schedule: bool = False
+    add_dict: dict[str] = None
 
 
 def evaluate_prompt_schedule(text: str, length: int, clip: CLIP, options: PromptOptions):
@@ -234,11 +235,16 @@ def handle_prompt_interpolation(pairs: list[InputPair], length: int, clip: CLIP,
             if len(value) < length:
                 values_replace[key] = extend_list_to_batch_size(value, length)
 
-    pairs_lengths = len(pairs)
+    scheduled_keyframes = []
+    if clip.use_clip_schedule:
+        clip = clip.clone()
+        scheduled_keyframes = clip.patcher.forced_hooks.get_hooks_for_clip_schedule()
+
+    pairs_lengths = len(pairs) * max(1, len(scheduled_keyframes))
     pbar_total = length + pairs_lengths
     pbar = ProgressBar(pbar_total)
     # for now, use FizzNodes approach of calculating max size of tokens beforehand;
-    # this doubles total encoding time, as this will be done again.
+    # this can up to double total encoding time, as this will be done again.
     # TODO: do this dynamically to save encoding time
     max_size = 0
     for pair in pairs:
@@ -247,22 +253,59 @@ def handle_prompt_interpolation(pairs: list[InputPair], length: int, clip: CLIP,
         max_size = max(max_size, cond.shape[1])
         pbar.update(1)
 
+    # if do not need to schedule clip with hooks, do nothing special
+    if not clip.use_clip_schedule:
+        return _handle_prompt_interpolation(pairs, length, clip, options, values_replace, max_size, pbar)
+    # otherwise, need to account for keyframes on forced_hooks
+    full_output = []
+    for i, scheduled_opts in enumerate(scheduled_keyframes):
+        clip.patcher.forced_hooks.reset()
+        clip.patcher.unpatch_hooks()
+
+        t_range = scheduled_opts[0]
+        hooks_keyframes = scheduled_opts[1]
+        for hook, keyframe in hooks_keyframes:
+            hook.hook_keyframe._current_keyframe = keyframe
+        try:
+            # don't print_schedule on non-first iteration
+            orig_print_schedule = options.print_schedule
+            if orig_print_schedule and i != 0:
+                options.print_schedule = False
+            schedule_output = _handle_prompt_interpolation(pairs, length, clip, options, values_replace, max_size, pbar)
+        finally:
+            options.print_schedule = orig_print_schedule
+        for cond, pooled_dict in schedule_output:
+            pooled_dict: dict[str]
+            # add clip_start_percent and clip_end_percent in pooled
+            pooled_dict["clip_start_percent"] = t_range[0]
+            pooled_dict["clip_end_percent"] = t_range[1]
+        full_output.extend(schedule_output)
+    return full_output
+
+
+def _handle_prompt_interpolation(pairs: list[InputPair], length: int, clip: CLIP, options: PromptOptions,
+                                 values_replace: dict[str, list[float]], max_size: int, pbar: ProgressBar):
     real_holders: list[CondHolder] = [None] * length
     real_cond = [None] * length
     real_pooled = [None] * length
     prev_holder: Union[CondHolder, None] = None
     for idx, pair in enumerate(pairs):
         holder = None
+        is_over_length = False
         # if no last pair is set, then use first provided val up to the idx
         if prev_holder is None:
             for i in range(idx, pair.idx+1):
                 if i >= length:
+                    is_over_length = True
                     continue
                 real_prompt = apply_values_replace_to_prompt(pair.val, i, values_replace=values_replace)
                 if holder is None or holder.prompt != real_prompt:
                     cond, pooled = clip.encode_from_tokens(clip.tokenize(real_prompt), return_pooled=True)
                     cond = pad_cond(cond, target_length=max_size)
                     holder = CondHolder(idx=i, prompt=real_prompt, raw_prompt=pair.val, cond=cond, pooled=pooled, hold=pair.hold)
+                else:
+                    holder = replace(holder)
+                    holder.idx = i
                 real_cond[i] = cond
                 real_pooled[i] = pooled
                 real_holders[i] = holder
@@ -288,6 +331,7 @@ def handle_prompt_interpolation(pairs: list[InputPair], length: int, clip: CLIP,
                 # however, need to check if real_prompt remains the same
                 for i in range(prev_holder.idx+1, pair.idx):
                     if i >= length:
+                        is_over_length = True
                         continue
                     if holder is None:
                         holder = prev_holder
@@ -296,6 +340,9 @@ def handle_prompt_interpolation(pairs: list[InputPair], length: int, clip: CLIP,
                         cond, pooled = clip.encode_from_tokens(clip.tokenize(real_prompt), return_pooled=True)
                         cond = pad_cond(cond, target_length=max_size)
                         holder = CondHolder(idx=i, prompt=real_prompt, raw_prompt=pair.val, cond=cond, pooled=pooled, hold=pair.hold)
+                    else:
+                        holder = replace(holder)
+                        holder.idx = i
                     real_cond[i] = holder.cond
                     real_pooled[i] = holder.pooled
                     real_holders[i] = holder
@@ -323,16 +370,17 @@ def handle_prompt_interpolation(pairs: list[InputPair], length: int, clip: CLIP,
                 cond_from = None
                 holder = None
                 interm_holder = prev_holder
-                for idx, weight in zip(interp_idxs, interp_weights):
-                    if idx >= length:
+                for raw_idx, weight in zip(interp_idxs, interp_weights):
+                    if raw_idx >= length:
+                        is_over_length = True
                         continue
-                    idx_int = round(float(idx))
+                    idx_int = round(float(raw_idx))
                     # calculate cond_to stuff if not done yet
                     real_prompt = apply_values_replace_to_prompt(pair.val, idx_int, values_replace=values_replace)
                     if holder is None or holder.prompt != real_prompt:
                         cond_to, pooled_to = clip.encode_from_tokens(clip.tokenize(real_prompt), return_pooled=True)
                         cond_to = pad_cond(cond_to, target_length=max_size)
-                        holder = CondHolder(idx=pair.idx, prompt=real_prompt, raw_prompt=pair.val, cond=cond_to, pooled=pooled_to, hold=pair.hold)
+                        holder = CondHolder(idx=idx_int, prompt=real_prompt, raw_prompt=pair.val, cond=cond_to, pooled=pooled_to, hold=pair.hold)
                     # calculate interm_holder stuff if needed
                     real_prompt = apply_values_replace_to_prompt(interm_holder.raw_prompt, idx_int, values_replace=values_replace)
                     if interm_holder.prompt != real_prompt:
@@ -356,6 +404,8 @@ def handle_prompt_interpolation(pairs: list[InputPair], length: int, clip: CLIP,
                     real_holders[idx_int] = interm_holder
                     pbar.update(1)
                     comfy.model_management.throw_exception_if_processing_interrupted()
+        if is_over_length:
+            break
         assert holder is not None
         prev_holder = holder
 
@@ -373,9 +423,9 @@ def handle_prompt_interpolation(pairs: list[InputPair], length: int, clip: CLIP,
             real_cond[i] = prev_holder.cond
             real_pooled[i] = prev_holder.pooled
             real_holders[i] = prev_holder
+            pbar.update(1)
         else:
             prev_holder = real_holders[i]
-        pbar.update(1)
     
     final_cond = torch.cat(real_cond, dim=0)
     final_pooled = torch.cat(real_pooled, dim=0)
@@ -388,7 +438,12 @@ def handle_prompt_interpolation(pairs: list[InputPair], length: int, clip: CLIP,
             else:
                 logger.info(f'{i} = ({1.-holder.interp_weight:.2f})"{holder.prompt}" -> ({holder.interp_weight:.2f})"{holder.interp_prompt}"')
     # cond is a list[list[Tensor, dict[str: Any]]] format
-    return [[final_cond, {"pooled_output": final_pooled}]]
+    final_pooled_dict = {"pooled_output": final_pooled}
+    if options.add_dict is not None:
+        final_pooled_dict.update(options.add_dict)
+    # add hooks, if needed
+    clip.add_hooks_to_dict(final_pooled_dict)
+    return [[final_cond, final_pooled_dict]]
 
 
 def pad_cond(cond: Tensor, target_length: int):
