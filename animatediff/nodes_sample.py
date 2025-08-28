@@ -5,9 +5,9 @@ from collections.abc import Iterable
 from comfy.sd import VAE
 
 from .freeinit import FreeInitFilter
-from .sample_settings import (FreeInitOptions, IterationOptions,
-                              NoiseLayerAdd, NoiseLayerAddWeighted, NoiseLayerGroup, NoiseLayerReplace, NoiseLayerType,
-                              SeedNoiseGeneration, SampleSettings, NoiseCalibration,
+from .sample_settings import (FreeInitOptions, IterationOptions, AncestralOptions,
+                              NoiseLayerAdd, NoiseLayerAddWeighted, NoiseLayerNormalizedSum, NoiseLayerGroup, NoiseLayerReplace, NoiseLayerType,
+                              SeedNoiseGeneration, SampleSettings, NoiseCalibration, NoiseDeterminism,
                               CustomCFGKeyframeGroup, CustomCFGKeyframe, CFGExtrasGroup, CFGExtras,
                               NoisedImageToInjectGroup, NoisedImageToInject, NoisedImageInjectOptions)
 from .utils_model import BIGMIN, BIGMAX, MAX_RESOLUTION, SigmaSchedule, InterpolationMethod
@@ -33,6 +33,7 @@ class SampleSettingsNode:
                 "custom_cfg": ("CUSTOM_CFG",),
                 "sigma_schedule": ("SIGMA_SCHEDULE",),
                 "image_inject": ("IMAGE_INJECT",),
+                "ancestral_opts": ("ANCESTRAL_OPTS",),
                 #"noise_calib": ("NOISE_CALIBRATION",), # TODO: bring back once NoiseCalibration is working
             },
             "hidden": {
@@ -48,11 +49,41 @@ class SampleSettingsNode:
     def create_settings(self, batch_offset: int, noise_type: str, seed_gen: str, seed_offset: int, noise_layers: NoiseLayerGroup=None,
                         iteration_opts: IterationOptions=None, seed_override: int=None, adapt_denoise_steps=False,
                         custom_cfg: CustomCFGKeyframeGroup=None, sigma_schedule: SigmaSchedule=None, image_inject: NoisedImageToInjectGroup=None,
-                        noise_calib: NoiseCalibration=None):
+                        noise_calib: NoiseCalibration=None, ancestral_opts=None):
         sampling_settings = SampleSettings(batch_offset=batch_offset, noise_type=noise_type, seed_gen=seed_gen, seed_offset=seed_offset, noise_layers=noise_layers,
                                            iteration_opts=iteration_opts, seed_override=seed_override, adapt_denoise_steps=adapt_denoise_steps,
-                                           custom_cfg=custom_cfg, sigma_schedule=sigma_schedule, image_injection=image_inject, noise_calibration=noise_calib)
+                                           custom_cfg=custom_cfg, sigma_schedule=sigma_schedule, image_injection=image_inject, noise_calibration=noise_calib,
+                                           ancestral_opts=ancestral_opts)
         return (sampling_settings,)
+
+
+class AncestralOptionsNode:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                #"batch_offset": ("INT", {"default": 0, "min": 0, "max": BIGMAX}),
+                "noise_type": (NoiseLayerType.LIST_ANCESTRAL,),
+                #"determinism": (NoiseDeterminism._LIST,),
+                "seed_offset": ("INT", {"default": 0, "min": BIGMIN, "max": BIGMAX}),
+                #"seed_gen_override": (SeedNoiseGeneration.LIST_WITH_OVERRIDE,),
+            },
+            "optional": {
+                "seed_override": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "forceInput": True}),
+            },
+            "hidden": {
+                "autosize": ("ADEAUTOSIZE", {"padding": 0}),
+            }
+        }
+
+    RETURN_TYPES = ("ANCESTRAL_OPTS",)
+    CATEGORY = "Animate Diff 🎭🅐🅓/sample settings"
+    FUNCTION = "create_ancestral_opts"
+
+    def create_ancestral_opts(self, noise_type: str, seed_offset: int, determinism: str=NoiseDeterminism.DEFAULT, seed_override: int=None):
+        if isinstance(seed_override, Iterable):
+            raise Exception("Passing in a list of seeds for Ancestral Options is not supported at this time.")
+        return (AncestralOptions(noise_type=noise_type, determinism=determinism, seed_offset=seed_offset, seed_override=seed_override),)
 
 
 class NoiseLayerReplaceNode:
@@ -169,6 +200,46 @@ class NoiseLayerAddWeightedNode:
         layer = NoiseLayerAddWeighted(noise_type=noise_type, batch_offset=batch_offset, seed_gen_override=seed_gen_override, seed_offset=seed_offset,
                               seed_override=seed_override, mask=mask_optional,
                               noise_weight=noise_weight, balance_multiplier=balance_multiplier)
+        prev_noise_layers.add_to_start(layer)
+        return (prev_noise_layers,)
+
+
+class NoiseLayerNormalizedSumNode:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "batch_offset": ("INT", {"default": 0, "min": 0, "max": BIGMAX}),
+                "noise_type": (NoiseLayerType.LIST,),
+                "seed_gen_override": (SeedNoiseGeneration.LIST_WITH_OVERRIDE,),
+                "seed_offset": ("INT", {"default": 0, "min": BIGMIN, "max": BIGMAX}),
+                "noise_weight": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.001}),
+            },
+            "optional": {
+                "prev_noise_layers": ("NOISE_LAYERS",),
+                "mask_optional": ("MASK",),
+                "seed_override": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "forceInput": True}),
+            },
+            "hidden": {
+                "autosize": ("ADEAUTOSIZE", {"padding": 0}),
+            }
+        }
+
+    RETURN_TYPES = ("NOISE_LAYERS",)
+    CATEGORY = "Animate Diff 🎭🅐🅓/noise layers"
+    FUNCTION = "create_layers"
+
+    def create_layers(self, batch_offset: int, noise_type: str, seed_gen_override: str, seed_offset: int,
+                      noise_weight: float,
+                      prev_noise_layers: NoiseLayerGroup=None, mask_optional: Tensor=None, seed_override: int=None,):
+        # prepare prev_noise_layers
+        if prev_noise_layers is None:
+            prev_noise_layers = NoiseLayerGroup()
+        prev_noise_layers = prev_noise_layers.clone()
+        # create layer
+        layer = NoiseLayerNormalizedSum(noise_type=noise_type, batch_offset=batch_offset, seed_gen_override=seed_gen_override, seed_offset=seed_offset,
+                              seed_override=seed_override, mask=mask_optional,
+                              noise_weight=noise_weight)
         prev_noise_layers.add_to_start(layer)
         return (prev_noise_layers,)
 

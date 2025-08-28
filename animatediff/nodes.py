@@ -23,10 +23,10 @@ from .nodes_conditioning import (CreateLoraHookKeyframeInterpolationDEPR,
                                  PairedConditioningCombineDEPR, ConditioningCombineDEPR,
                                  ConditioningTimestepsNodeDEPR, SetLoraHookKeyframesDEPR,
                                  CreateLoraHookKeyframeDEPR, CreateLoraHookKeyframeFromStrengthListDEPR)
-from .nodes_sample import (FreeInitOptionsNode, NoiseLayerAddWeightedNode, SampleSettingsNode, NoiseLayerAddNode, NoiseLayerReplaceNode, IterationOptionsNode,
+from .nodes_sample import (FreeInitOptionsNode, NoiseLayerAddWeightedNode, NoiseLayerNormalizedSumNode, SampleSettingsNode, NoiseLayerAddNode, NoiseLayerReplaceNode, IterationOptionsNode,
                            CustomCFGNode, CustomCFGSimpleNode, CustomCFGKeyframeNode, CustomCFGKeyframeSimpleNode, CustomCFGKeyframeInterpolationNode, CustomCFGKeyframeFromListNode,
                            CFGExtrasPAGNode, CFGExtrasPAGSimpleNode, CFGExtrasRescaleCFGNode, CFGExtrasRescaleCFGSimpleNode,
-                           NoisedImageInjectionNode, NoisedImageInjectOptionsNode, NoiseCalibrationNode)
+                           NoisedImageInjectionNode, NoisedImageInjectOptionsNode, NoiseCalibrationNode, AncestralOptionsNode)
 from .nodes_sigma_schedule import (SigmaScheduleNode, RawSigmaScheduleNode, WeightedAverageSigmaScheduleNode, InterpolatedWeightedAverageSigmaScheduleNode, SplitAndCombineSigmaScheduleNode, SigmaScheduleToSigmasNode)
 from .nodes_context import (LegacyLoopedUniformContextOptionsNode, LoopedUniformContextOptionsNode, LoopedUniformViewOptionsNode, StandardUniformContextOptionsNode, StandardStaticContextOptionsNode, BatchedContextOptionsNode,
                             StandardStaticViewOptionsNode, StandardUniformViewOptionsNode, ViewAsContextOptionsNode,
@@ -39,7 +39,7 @@ from .nodes_context_extras import (SetContextExtrasOnContextOptions, ContextExtr
 from .nodes_ad_settings import (AnimateDiffSettingsNode, ManualAdjustPENode, SweetspotStretchPENode, FullStretchPENode,
                                 WeightAdjustAllAddNode, WeightAdjustAllMultNode, WeightAdjustIndivAddNode, WeightAdjustIndivMultNode,
                                 WeightAdjustIndivAttnAddNode, WeightAdjustIndivAttnMultNode)
-from .nodes_scheduling import (PromptSchedulingNode, PromptSchedulingLatentsNode, ValueSchedulingNode, ValueSchedulingLatentsNode,
+from .nodes_scheduling import (ConditionExtractionNode, PromptSchedulingNode, PromptSchedulingLatentsNode, ValueSchedulingNode, ValueSchedulingLatentsNode,
                                AddValuesReplaceNode, FloatToFloatsNode)
 from .nodes_per_block import (ADBlockComboNode, ADBlockIndivNode, PerBlockHighLevelNode,
                               PerBlock_SD15_LowLevelNode, PerBlock_SD15_MidLevelNode, PerBlock_SD15_FromFloatsNode,
@@ -126,6 +126,7 @@ NODE_CLASS_MAPPINGS = {
     # Noise Layer Nodes
     "ADE_NoiseLayerAdd": NoiseLayerAddNode,
     "ADE_NoiseLayerAddWeighted": NoiseLayerAddWeightedNode,
+    "ADE_NoiseLayerNormalizedSum": NoiseLayerNormalizedSumNode,
     "ADE_NoiseLayerReplace": NoiseLayerReplaceNode,
     # AnimateDiff Settings
     "ADE_AnimateDiffSettings": AnimateDiffSettingsNode,
@@ -157,12 +158,14 @@ NODE_CLASS_MAPPINGS = {
     "ADE_SigmaScheduleToSigmas": SigmaScheduleToSigmasNode,
     "ADE_NoisedImageInjection": NoisedImageInjectionNode,
     "ADE_NoisedImageInjectOptions": NoisedImageInjectOptionsNode,
+    "ADE_AncestralOptions": AncestralOptionsNode,
     #"ADE_NoiseCalibration": NoiseCalibrationNode,
     # Scheduling
     PromptSchedulingNode.NodeID: PromptSchedulingNode,
     PromptSchedulingLatentsNode.NodeID: PromptSchedulingLatentsNode,
     ValueSchedulingNode.NodeID: ValueSchedulingNode,
     ValueSchedulingLatentsNode.NodeID: ValueSchedulingLatentsNode,
+    ConditionExtractionNode.NodeID: ConditionExtractionNode,
     AddValuesReplaceNode.NodeID: AddValuesReplaceNode,
     FloatToFloatsNode.NodeID: FloatToFloatsNode,
     # Per-Block
@@ -304,6 +307,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     # Noise Layer Nodes
     "ADE_NoiseLayerAdd": "Noise Layer [Add] 🎭🅐🅓",
     "ADE_NoiseLayerAddWeighted": "Noise Layer [Add Weighted] 🎭🅐🅓",
+    "ADE_NoiseLayerNormalizedSum": "Noise Layer [Normalized Sum] 🎭🅐🅓",
     "ADE_NoiseLayerReplace": "Noise Layer [Replace] 🎭🅐🅓",
     # AnimateDiff Settings
     "ADE_AnimateDiffSettings": "AnimateDiff Settings 🎭🅐🅓",
@@ -336,11 +340,13 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "ADE_NoisedImageInjection": "Image Injection 🎭🅐🅓",
     "ADE_NoisedImageInjectOptions": "Image Injection Options 🎭🅐🅓",
     "ADE_NoiseCalibration": "Noise Calibration 🎭🅐🅓",
+    "ADE_AncestralOptions": "Ancestral Options 🎭🅐🅓",
     # Scheduling
     PromptSchedulingNode.NodeID: PromptSchedulingNode.NodeName,
     PromptSchedulingLatentsNode.NodeID: PromptSchedulingLatentsNode.NodeName,
     ValueSchedulingNode.NodeID: ValueSchedulingNode.NodeName,
     ValueSchedulingLatentsNode.NodeID: ValueSchedulingLatentsNode.NodeName,
+    ConditionExtractionNode.NodeID: ConditionExtractionNode.NodeName,
     AddValuesReplaceNode.NodeID: AddValuesReplaceNode.NodeName,
     FloatToFloatsNode.NodeID:FloatToFloatsNode.NodeName,
     # Per-Block

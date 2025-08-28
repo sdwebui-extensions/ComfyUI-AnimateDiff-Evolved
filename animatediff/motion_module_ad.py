@@ -30,6 +30,15 @@ from .utils_motion import (CrossAttentionMM, MotionCompatibilityError, DummyNNMo
                            prepare_mask_batch, get_combined_multival)
 from .utils_model import BetaSchedules, ModelTypeSD
 from .logger import logger
+from .dinklink import get_dinklink, DinkLinkConst
+
+
+def prepare_dinklink_motion_module_ad():
+    # expose create_MotionModelPatcher
+    d = get_dinklink()
+    link_ade = d.setdefault(DinkLinkConst.ADE, {})
+    link_ade[DinkLinkConst.ADE_ANIMATEDIFFMODEL] = AnimateDiffModel
+    link_ade[DinkLinkConst.ADE_ANIMATEDIFFINFO] = AnimateDiffInfo
 
 
 def zero_module(module):
@@ -1378,7 +1387,7 @@ class TemporalTransformerBlock(nn.Module):
                     count += 1
                 sub_hidden_states = rearrange(sub_hidden_states, "(b f) d c -> b f d c", f=len(sub_idxs))
 
-                weights = get_context_weights(len(sub_idxs), view_options.fuse_method) * batched_conds
+                weights = get_context_weights(len(sub_idxs), video_length, sub_idxs, view_options, sigma=transformer_options["sigmas"]) * batched_conds
                 weights_tensor = torch.Tensor(weights).to(device=hidden_states.device).unsqueeze(0).unsqueeze(-1).unsqueeze(-1)
                 value_final[:, sub_idxs] += sub_hidden_states * weights_tensor
                 count_final[:, sub_idxs] += weights_tensor
